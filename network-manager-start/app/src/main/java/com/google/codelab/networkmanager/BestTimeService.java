@@ -27,13 +27,12 @@ import com.google.android.gms.gcm.TaskParams;
  */
 public class BestTimeService extends GcmTaskService {
 
-  private static final String TAG = "BestTimeService";
+  private static final String TAG = BestTimeService.class.getSimpleName();
 
   @Override
   public int onRunTask(TaskParams taskParams) {
     String taskId = taskParams.getExtras().getString(CodelabUtil.TASK_ID);
     boolean completed = CodelabUtil.makeNetworkCall();
-
     Log.d(TAG, "Oneoff scheduled call executed. Task ID: " + taskId);
 
     // Prepare Intent to send with broadcast.
@@ -43,17 +42,12 @@ public class BestTimeService extends GcmTaskService {
     if (taskItem == null) {
       return GcmNetworkManager.RESULT_FAILURE;
     }
-    if (completed) {
-      taskItem.setStatus(TaskItem.EXECUTED_STATUS);
-    } else {
-      taskItem.setStatus(TaskItem.FAILED_STATUS);
-    }
+    taskItem.setStatus(completed ? TaskItem.EXECUTED_STATUS : TaskItem.FAILED_STATUS);
     taskUpdateIntent.putExtra(CodelabUtil.TASK_STATUS, taskItem.getStatus());
     CodelabUtil.saveTaskItemToFile(this, taskItem);
 
     // Notify listeners (MainActivity) that task was completed successfully.
-    LocalBroadcastManager localBroadcastManager =
-        LocalBroadcastManager.getInstance(this);
+    LocalBroadcastManager localBroadcastManager = LocalBroadcastManager.getInstance(this);
     localBroadcastManager.sendBroadcast(taskUpdateIntent);
     return GcmNetworkManager.RESULT_SUCCESS;
   }

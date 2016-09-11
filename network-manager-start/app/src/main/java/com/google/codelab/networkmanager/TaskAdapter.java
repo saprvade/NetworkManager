@@ -25,28 +25,31 @@ import android.widget.TextView;
 
 import java.util.List;
 
-public class TaskAdapter extends RecyclerView.Adapter<TaskAdapter.ViewHolder> {
+public class TaskAdapter extends RecyclerView.Adapter<TaskAdapter.ViewHolder>
+    implements DeleteTask.DeleteTaskListener {
 
-  private static final String TAG = "TaskAdapter";
+  private static final String TAG = TaskAdapter.class.getSimpleName();
 
-  private List<TaskItem> mTaskItems;
+  private final LayoutInflater inflater;
+  private final List<TaskItem> taskItems;
 
-  public TaskAdapter(List<TaskItem> taskItems) {
-    mTaskItems = taskItems;
+  public TaskAdapter(Context context, List<TaskItem> taskItems) {
+    this.inflater = LayoutInflater.from(context);
+    this.taskItems = taskItems;
   }
 
   @Override
-  public TaskAdapter.ViewHolder onCreateViewHolder(ViewGroup viewGroup, int i) {
-    View v = LayoutInflater.from(viewGroup.getContext()).inflate(R.layout.item_task, viewGroup, false);
+  public TaskAdapter.ViewHolder onCreateViewHolder(ViewGroup viewGroup, int viewType) {
+    View v = inflater.inflate(R.layout.item_task, viewGroup, false /* attachToRoot */);
     final ViewHolder viewHolder = new ViewHolder(v);
     viewHolder.getDeleteButton().setOnClickListener(new View.OnClickListener() {
       @Override
       public void onClick(View view) {
         int position = viewHolder.getAdapterPosition();
-        Log.d(TAG, position + " - " + mTaskItems.size());
-        TaskItem taskItem = mTaskItems.get(position);
+        Log.d(TAG, position + " - " + taskItems.size());
+        TaskItem taskItem = taskItems.get(position);
         Log.d(TAG, "Clicked button at position " + position);
-        new DeleteTask(view.getContext()).execute(taskItem);
+        new DeleteTask(view.getContext(), TaskAdapter.this).execute(taskItem);
       }
     });
     return viewHolder;
@@ -54,40 +57,30 @@ public class TaskAdapter extends RecyclerView.Adapter<TaskAdapter.ViewHolder> {
 
   @Override
   public void onBindViewHolder(TaskAdapter.ViewHolder viewHolder, final int position) {
-    final TaskItem taskItem = mTaskItems.get(position);
+    TaskItem taskItem = taskItems.get(position);
     viewHolder.getLabelTextView().setText(taskItem.getType());
     viewHolder.getStatusTextView().setText(taskItem.getStatus());
   }
 
   @Override
   public int getItemCount() {
-    return mTaskItems.size();
+    return taskItems.size();
   }
 
   public void setTaskItems(List<TaskItem> taskItems) {
-    mTaskItems.clear();
-    mTaskItems.addAll(taskItems);
+    this.taskItems.clear();
+    this.taskItems.addAll(taskItems);
     notifyDataSetChanged();
   }
 
   public void addTaskItem(TaskItem taskItem) {
-    mTaskItems.add(0, taskItem);
+    taskItems.add(0, taskItem);
     notifyItemInserted(0);
   }
 
-  private int getTaskItemPosition(String id) {
-    for (int i = 0; i < mTaskItems.size(); i++) {
-      TaskItem taskItem = mTaskItems.get(i);
-      if (taskItem.getId().equals(id)) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
   public void updateTaskItemStatus(String id, String status) {
-    for (int i = 0; i < mTaskItems.size(); i++) {
-      TaskItem taskItem = mTaskItems.get(i);
+    for (int i = 0; i < taskItems.size(); i++) {
+      TaskItem taskItem = taskItems.get(i);
       if (taskItem.getId().equals(id)) {
         taskItem.setStatus(status);
         notifyItemChanged(i);
@@ -96,54 +89,45 @@ public class TaskAdapter extends RecyclerView.Adapter<TaskAdapter.ViewHolder> {
     }
   }
 
-  // AsyncTask to delete from file off the UI thread.
-  private class DeleteTask extends AsyncTask<TaskItem, Void, Integer> {
+  @Override
+  public int getTaskCount() {
+    return taskItems.size();
+  }
 
-    private Context mContext;
+  @Override
+  public TaskItem getTask(int position) {
+    return taskItems.get(position);
+  }
 
-    public DeleteTask(Context context) {
-      mContext = context;
-    }
-
-    @Override
-    protected Integer doInBackground(TaskItem... taskItems) {
-      TaskItem taskItem = taskItems[0];
-      CodelabUtil.deleteTaskItemFromFile(mContext, taskItems[0]);
-      return getTaskItemPosition(taskItem.getId());
-    }
-
-    @Override
-    protected void onPostExecute(Integer position) {
-      if (position == -1) {
-        return;
-      }
-      mTaskItems.remove(position.intValue());
-      notifyItemRemoved(position);
-    }
+  @Override
+  public void onTaskDeleted(int position) {
+    taskItems.remove(position);
+    notifyItemRemoved(position);
   }
 
   public static class ViewHolder extends RecyclerView.ViewHolder {
-    private final TextView mLabelTextView;
-    private final TextView mStatusTextView;
-    private final Button mDeleteButton;
+
+    private final TextView labelTextView;
+    private final TextView statusTextView;
+    private final Button deleteButton;
 
     public ViewHolder(View v) {
       super(v);
-      mLabelTextView = (TextView) v.findViewById(R.id.taskLabel);
-      mStatusTextView = (TextView) v.findViewById(R.id.taskStatus);
-      mDeleteButton = (Button) v.findViewById(R.id.deleteButton);
+      labelTextView = (TextView) v.findViewById(R.id.taskLabel);
+      statusTextView = (TextView) v.findViewById(R.id.taskStatus);
+      deleteButton = (Button) v.findViewById(R.id.deleteButton);
     }
 
     public TextView getLabelTextView() {
-      return mLabelTextView;
+      return labelTextView;
     }
 
     public TextView getStatusTextView() {
-      return mStatusTextView;
+      return statusTextView;
     }
 
     public Button getDeleteButton() {
-      return mDeleteButton;
+      return deleteButton;
     }
   }
 }

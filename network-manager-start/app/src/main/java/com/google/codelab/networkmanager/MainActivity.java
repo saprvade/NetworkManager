@@ -26,7 +26,6 @@ import android.support.v7.widget.RecyclerView;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import android.widget.Toast;
 
 import com.google.android.gms.gcm.GcmNetworkManager;
 import com.google.android.gms.gcm.OneoffTask;
@@ -38,41 +37,40 @@ import java.util.List;
 /**
  * Controller of main/only UI for this sample.
  */
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements LoadTask.LoadTaskListener,
+    AddTask.AddTaskListener {
 
+  private static final String TAG = MainActivity.class.getSimpleName();
   public static final String TASK_ID_PREFIX = "task-id";
 
-  private static final String TAG = "MainActivity";
-  private LocalBroadcastManager mLocalBroadcastManager;
-  private BroadcastReceiver mBroadcastReceiver;
-  private GcmNetworkManager mGcmNetworkManager;
+  private LocalBroadcastManager localBroadcastManager;
+  private BroadcastReceiver broadcastReceiver;
+  private GcmNetworkManager gcmNetworkManager;
 
-  private TaskAdapter mTaskAdapter;
-  private RecyclerView mRecyclerView;
+  private TaskAdapter taskAdapter;
+  private RecyclerView recyclerView;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
 
-    mGcmNetworkManager = GcmNetworkManager.getInstance(this);
+    gcmNetworkManager = GcmNetworkManager.getInstance(this);
 
-    mTaskAdapter = new TaskAdapter(new ArrayList<TaskItem>());
+    taskAdapter = new TaskAdapter(this, new ArrayList<TaskItem>());
 
     LinearLayoutManager linearLayoutManager = new LinearLayoutManager(this);
-    mRecyclerView = (RecyclerView) findViewById(R.id.recyclerView);
-    mRecyclerView.setLayoutManager(linearLayoutManager);
-    mRecyclerView.setAdapter(mTaskAdapter);
+    recyclerView = (RecyclerView) findViewById(R.id.recyclerView);
+    recyclerView.setLayoutManager(linearLayoutManager);
+    recyclerView.setAdapter(taskAdapter);
     Button bestTimeButton = (Button) findViewById(R.id.bestTimeButton);
     bestTimeButton.setOnClickListener(new View.OnClickListener() {
       @Override
       public void onClick(View view) {
-        String taskId = TASK_ID_PREFIX +
-            Calendar.getInstance().getTimeInMillis();
+        String taskId = TASK_ID_PREFIX + Calendar.getInstance().getTimeInMillis();
         Log.d(TAG, "Scheduling oneoff task. " + taskId);
-        TaskItem taskItem = new TaskItem(taskId, TaskItem.ONEOFF_TASK,
-            TaskItem.PENDING_STATUS);
-        new AddTask(view.getContext()).execute(taskItem);
+        TaskItem taskItem = new TaskItem(taskId, TaskItem.ONEOFF_TASK, TaskItem.PENDING_STATUS);
+        new AddTask(view.getContext(), MainActivity.this).execute(taskItem);
       }
     });
 
@@ -83,101 +81,67 @@ public class MainActivity extends AppCompatActivity {
         String taskId = TASK_ID_PREFIX + Calendar.getInstance().getTimeInMillis();
         Log.d(TAG, "Creating a Now Task. " + taskId);
         TaskItem taskItem = new TaskItem(taskId, TaskItem.NOW_TASK, TaskItem.PENDING_STATUS);
-        new AddTask(view.getContext()).execute(taskItem);
+        new AddTask(view.getContext(), MainActivity.this).execute(taskItem);
       }
     });
 
-    mLocalBroadcastManager = LocalBroadcastManager.getInstance(this);
-    mBroadcastReceiver = new BroadcastReceiver() {
+    localBroadcastManager = LocalBroadcastManager.getInstance(this);
+    broadcastReceiver = new BroadcastReceiver() {
       @Override
       public void onReceive(Context context, Intent intent) {
         String taskId = intent.getStringExtra(CodelabUtil.TASK_ID);
         String status = intent.getStringExtra(CodelabUtil.TASK_STATUS);
-
-        mTaskAdapter.updateTaskItemStatus(taskId, status);
+        taskAdapter.updateTaskItemStatus(taskId, status);
       }
     };
   }
 
   @Override
+  public void onItemsLoaded(List<TaskItem> taskItems) {
+    taskAdapter.setTaskItems(taskItems);
+    taskAdapter.notifyDataSetChanged();
+  }
+
+  @Override
+  public void onTaskAdded(TaskItem taskItem) {
+    taskAdapter.addTaskItem(taskItem);
+    recyclerView.scrollToPosition(0);
+
+    if (taskItem.getType().equals(TaskItem.ONEOFF_TASK)) {
+      Bundle bundle = new Bundle();
+      bundle.putString(CodelabUtil.TASK_ID, taskItem.getId());
+
+      // Schedule oneoff task.
+      OneoffTask oneoffTask = new OneoffTask.Builder()
+          .setService(BestTimeService.class)
+          .setTag(taskItem.getId())
+          .setRequiredNetwork(OneoffTask.NETWORK_STATE_CONNECTED)
+          // Use an execution window of 30 seconds or more. Less than 30
+          // seconds would not allow GcmNetworkManager enough time to
+          // optimize the next best time to execute your task.
+          .setExecutionWindow(0, 30)
+          .setExtras(bundle)
+          .build();
+      gcmNetworkManager.schedule(oneoffTask);
+    } else {
+      // Immediately make network call.
+      Intent nowIntent = new Intent(this, NowIntentService.class);
+      nowIntent.putExtra(CodelabUtil.TASK_ID, taskItem.getId());
+      startService(nowIntent);
+    }
+  }
+
+  @Override
   public void onResume() {
     super.onResume();
-    mLocalBroadcastManager.registerReceiver(mBroadcastReceiver, new IntentFilter(CodelabUtil.TASK_UPDATE_FILTER));
-    new LoadTask(this).execute();
+    localBroadcastManager.registerReceiver(
+        broadcastReceiver, new IntentFilter(CodelabUtil.TASK_UPDATE_FILTER));
+    new LoadTask(this, this).execute();
   }
 
   @Override
   public void onPause() {
-    mLocalBroadcastManager.unregisterReceiver(mBroadcastReceiver);
     super.onPause();
-  }
-
-  private class LoadTask extends AsyncTask<Void, Void, List<TaskItem>> {
-
-    private Context mContext;
-
-    public LoadTask(Context context) {
-      mContext = context;
-    }
-
-    @Override
-    protected List<TaskItem> doInBackground(Void... voids) {
-      return CodelabUtil.getTaskItemsFromFile(mContext);
-    }
-
-    @Override
-    protected void onPostExecute(List<TaskItem> taskItems) {
-      mTaskAdapter.setTaskItems(taskItems);
-      mTaskAdapter.notifyDataSetChanged();
-    }
-  }
-
-  // AsyncTask used to add tasks to file off the UI thread.
-  private class AddTask extends AsyncTask<TaskItem, Void, TaskItem> {
-
-    private Context mContext;
-
-    public AddTask(Context context) {
-      mContext = context;
-    }
-
-    @Override
-    protected TaskItem doInBackground(TaskItem... taskItems) {
-      // Items are being added to the list before being scheduled/executed to allow their state to be
-      // visible in the UI.
-      TaskItem taskItem = taskItems[0];
-      CodelabUtil.addTaskItemToFile(mContext, taskItem);
-      return taskItem;
-    }
-
-    @Override
-    protected void onPostExecute(TaskItem taskItem) {
-      mTaskAdapter.addTaskItem(taskItem);
-      mRecyclerView.scrollToPosition(0);
-
-      if (taskItem.getType().equals(TaskItem.ONEOFF_TASK)) {
-        Bundle bundle = new Bundle();
-        bundle.putString(CodelabUtil.TASK_ID, taskItem.getId());
-
-        // Schedule oneoff task.
-        OneoffTask oneoffTask = new OneoffTask.Builder()
-            .setService(BestTimeService.class)
-            .setTag(taskItem.getId())
-            .setRequiredNetwork(OneoffTask.NETWORK_STATE_CONNECTED)
-            // Use an execution window of 30 seconds or more. Less than 30
-            // seconds would not allow GcmNetworkManager enough time to
-            // optimize the next best time to execute your task.
-            .setExecutionWindow(0, 30)
-            .setExtras(bundle)
-            .build();
-        mGcmNetworkManager.schedule(oneoffTask);
-      } else {
-        // Immediately make network call.
-        Intent nowIntent = new Intent(mContext, NowIntentService.class);
-        nowIntent.putExtra(CodelabUtil.TASK_ID, taskItem.getId());
-        mContext.startService(nowIntent);
-      }
-    }
-
+    localBroadcastManager.unregisterReceiver(broadcastReceiver);
   }
 }
